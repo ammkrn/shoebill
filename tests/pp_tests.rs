@@ -238,7 +238,8 @@ fn test26() {
 #[test]
 fn test27() {
     let mut store = Printer::new();
-    let d = concat_w!(["a", "b", "c", "d"], NewlineZero, &mut store);
+    let newline_zero = Newline(Some("".alloc(&mut store)));
+    let d = concat_w!(["a", "b", "c", "d"], newline_zero, &mut store);
     assert_eq!(format!("{}", d.render(80, &mut store)), format!("a\nb\nc\nd"));
     
     let mut store = Printer::new();
@@ -246,3 +247,27 @@ fn test27() {
     assert_eq!(format!("{}", d.render(80, &mut store)), format!("this is text"));    
 }
 
+#[test]
+fn test28() {
+    let mut store = Printer::new();
+    let d1 = concat_w!(["a", "b", "c", "d"], Hardline, &mut store).group(&mut store);
+    let d2 = concat_w!(["a", "b", "c", "d"], Newline(None), &mut store).group(&mut store);
+    assert_eq!(format!("{}", d1.render(80, &mut store)), format!("a\nb\nc\nd"));
+    assert_eq!(format!("{}", d2.render(80, &mut store)), format!("a b c d"));
+}
+
+#[test]
+fn test29() {
+    let mut store = Printer::new();
+    let d1 = compose!(&mut store ; "this is some sample" <h> "text for" <h> "hardline testing");
+    let s1 = format!("this is some sample\ntext for\nhardline testing");
+    assert_eq!(format!("{}", d1.render(120, &mut store)), s1);
+}
+
+#[test]
+fn test30() {
+    let mut store = Printer::new();
+    let d1 = compose!(&mut store ; g @ ("this is some sample" <z> "text for" <z> "zero line testing"));
+    let s1 = format!("this is some sampletext forzero line testing");
+    assert_eq!(format!("{}", d1.render(120, &mut store)), s1);
+}

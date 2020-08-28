@@ -65,7 +65,7 @@ macro_rules! concat {
 ///```
 /// use shoebill::{ concat_w, Printer, Doclike, Doc::* };
 /// let mut store = Printer::new();
-/// let d = concat_w!(["a", "b", "c", "d"], NewlineZero, &mut store);
+/// let d = concat_w!(["a", "b", "c", "d"], Hardline, &mut store);
 /// assert_eq!(format!("{}", d.render(80, &mut store)), format!("a\nb\nc\nd"));
 ///```
 #[macro_export]
@@ -134,6 +134,7 @@ macro_rules! inter_trailing {
 /// //`a <> b` : Concat(a, b)
 /// //`a <n> b` : Concat(a, Concat(newline, b))
 /// //`a <s> b` : Concat(a, Concat(" ", b)) (concat with a space)
+/// //`a <h> b` : Concat(a, Concat(" ", b)) (concat with Hardline)
 /// //`n @ ds` : prefix ds with a newline
 /// //`g @ ds` : make ds a group
 /// //`<any u32> @ ds` : nest ds by whatever the amount specified by the integer literal.
@@ -203,7 +204,16 @@ macro_rules! compose {
         {
             let ll = compose!($pr ; $l);
             let rr = compose!($pr ; $r);
-            let ll = ll.concat(NewlineZero, $pr).concat(rr, $pr);
+            let newline_zero = Newline(Some("".alloc($pr)));
+            let ll = ll.concat(newline_zero, $pr).concat(rr, $pr);
+            compose!($pr ; ll $($rest)*)
+        }
+    };
+    ( $pr:expr; $l:tt <h> $r:tt $($rest:tt)* ) => {
+        {
+            let ll = compose!($pr ; $l);
+            let rr = compose!($pr ; $r);
+            let ll = ll.concat(Hardline, $pr).concat(rr, $pr);
             compose!($pr ; ll $($rest)*)
         }
     };
@@ -288,6 +298,7 @@ impl<'p> StringPtr<'p> {
 
 pub trait Doclike<'p, P> : Sized 
 where P : HasPrinter<'p> {
+    /// Generic over any Doclike, so you can use this for text as well.
     fn alloc(self, pr : &mut P) -> DocPtr<'p>;
 
     fn concat(self, other : impl Doclike<'p, P>, pr : &mut P) -> DocPtr<'p> {
@@ -328,7 +339,8 @@ where P : HasPrinter<'p> {
     }
 
     fn nest_doc_zero(self, other : impl Doclike<'p, P>, amt: u32, pr: &mut P) -> DocPtr<'p> {
-        compose!(pr ; self <> (amt @ (NewlineZero <> other)))
+        let newline_zero = Newline(Some("".alloc(pr)));
+        compose!(pr ; self <> (amt @ ((newline_zero) <> other)))
     }
 
     fn group(self, pr : &mut P) -> DocPtr<'p> {
@@ -390,8 +402,6 @@ impl<'x, 'p : 'x, P : HasPrinter<'p>> Display for Renderable<'x, 'p, P>  {
             match top.read(self.printer) {
                 // Skip all Nil elements.
                 Nil => continue,
-                // If we get a NewlineZero in flatmode, just skip it entirely.
-                NewlineZero if info.flat => continue,
                 Newline(Some(alt)) if info.flat => {
                     stack.push((alt, info));
                 },
@@ -401,8 +411,8 @@ impl<'x, 'p : 'x, P : HasPrinter<'p>> Display for Renderable<'x, 'p, P>  {
                     size += 1;
                     write!(f, " ")?;
                 }
-                Newline(_) | NewlineZero => {
-                    assert!(!info.flat);
+                Hardline | Newline(_) => {
+                    assert!(!info.flat || top.read(self.printer) == Hardline);
                     write!(f, "\n")?;
                     eol += 1;
                     size += 1;
@@ -499,10 +509,13 @@ impl<'p> Printer<'p> {
 /// group elements together (as a `Group` node), and all of the grouped elements
 /// will fit onto the current line without exceeding the line width specified 
 /// for rendering.
+///
+/// The default behavior of `Newline(None)` in flatmode is to render a space.
+/// `Hardline` will always render as a linebreak, no matter what.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Doc<'p> {
     Nil,
-    NewlineZero,
+    Hardline,
     Newline(Option<DocPtr<'p>>),
     Text(StringPtr<'p>),
     Concat {
@@ -537,8 +550,8 @@ impl<'p> DocPtr<'p> {
     fn has_newline(&self, pr : &impl HasPrinter<'p>) -> bool {
         match self.read(pr.printer()) {
             Nil => false,
-            Newline(..) 
-            | NewlineZero => true,
+            | Hardline
+            | Newline(..) => true,
             Concat { has_newline, .. } => has_newline,
             Nest   { has_newline, .. } => has_newline,
             Group  { has_newline, .. } => has_newline,
@@ -549,8 +562,8 @@ impl<'p> DocPtr<'p> {
     pub fn dist_next_newline(&self, pr : &impl HasPrinter<'p>) -> u32 {
         match self.read(pr.printer()) {
             Nil 
-            | Newline(..) 
-            | NewlineZero                 => 0,
+            | Hardline 
+            | Newline(..) => 0,
             Concat   { dist_next_newline, .. }
             | Nest   { dist_next_newline, .. } 
             | Group  { dist_next_newline, .. } => dist_next_newline,
@@ -561,7 +574,7 @@ impl<'p> DocPtr<'p> {
     pub fn flat_len(self, pr : &impl HasPrinter<'p>) -> u32 {
         match self.read(pr.printer()) {
             Nil 
-            | NewlineZero               => 0,
+            | Hardline => 0,
             Concat { flat_len, .. }     => flat_len,
             Nest   { flat_len, .. }     => flat_len,
             Group  { flat_len, .. }     => flat_len,
@@ -574,7 +587,7 @@ impl<'p> DocPtr<'p> {
 
 /// Just used to move rendering info between nodes.
 #[derive(Debug, Clone, Copy)]
-pub struct RenderInfo {
+struct RenderInfo {
     flat : bool,
     nest : u16,
     dist_next_newline : u16,
@@ -591,7 +604,7 @@ impl Default for RenderInfo {
 }
 
 impl RenderInfo {
-    pub fn new(
+    fn new(
         flat : bool, 
         nest : u16, 
         dist_next_newline : u16 
@@ -603,7 +616,7 @@ impl RenderInfo {
         }
     }
 
-    pub fn add_nest(self, addition : u16) -> Self {
+    fn add_nest(self, addition : u16) -> Self {
         RenderInfo {
             flat : self.flat,
             nest : self.nest + addition,
@@ -611,7 +624,7 @@ impl RenderInfo {
         }
     }
 
-    pub fn new_dist_next_newline(self, dist_next_newline : u16) -> Self {
+    fn new_dist_next_newline(self, dist_next_newline : u16) -> Self {
         RenderInfo {
             flat : self.flat,
             nest : self.nest,
@@ -619,7 +632,7 @@ impl RenderInfo {
         }
     }
 
-    pub fn with_flat(self, flat : bool) -> Self {
+    fn with_flat(self, flat : bool) -> Self {
         RenderInfo {
             flat,
             nest : self.nest,
