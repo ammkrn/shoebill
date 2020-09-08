@@ -271,3 +271,21 @@ fn test30() {
     let s1 = format!("this is some sampletext forzero line testing");
     assert_eq!(format!("{}", d1.render(120, &mut store)), s1);
 }
+
+#[test]
+fn test31() {
+    let mut store = Printer::new();
+    let alt = "an 'a'".alloc(&mut store);
+    let d = compose!(&mut store ; g @ "There should be" <s> (Newline(Some(alt))) <s> "here");
+    let dman = "There should be"
+    .concat(" ", &mut store)
+    .concat(Newline(Some(alt)), &mut store)
+    .concat(" ", &mut store)
+    .concat("here", &mut store)
+    .group(&mut store);
+
+    let s1 = format!("There should be an 'a' here");
+    assert_eq!(d, dman);
+    assert_eq!(format!("{}", d.render(80, &mut store)), s1);
+}
+

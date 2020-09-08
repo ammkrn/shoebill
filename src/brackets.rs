@@ -1,3 +1,16 @@
+//! Tools for managing bracketing during pretty-printing based.
+//! 
+//! Based on an implementation I saw Gabriel Ebner use that feels complicated, 
+//! but it makes sense once you get going, and there's
+//! no obvious solution that's better while preserving the generality this offers.
+//! The general source of the complexity is that you want both the caller and the callee
+//! to have control over whether or not something gets bracketed.
+//! There's a working example in the `pp` function of /examples/aexp
+//! The idea is that the pretty printing implementation for some type you have is a recursive
+//! (or faux-recursive) function that returns elements wrapped in this Parenable type, and have
+//! an associated number which lets the functions waiting on their return know whether or not
+//! they should wrap the value they get in brackets.
+
 use crate::concat;
 use crate::Doclike;
 use crate::DocPtr;
@@ -7,27 +20,11 @@ use crate::Renderable;
 
 use BracketPrio::*;
 
-/// A mechanism for managing bracketing during pretty-printing based on an implementation I saw
-/// Gabriel Ebner use. It feels complicated, but it makes sense once you get going, and there's
-/// no obvious solution that's better while preserving the generality this offers.
-/// The general source of the complexity is that you want both the caller and the callee
-/// to have control over whether or not something gets bracketed.
-/// There's a working example in the `pp` function of /examples/aexp
-/// The idea is that the pretty printing implementation for some type you have is a recursive
-/// (or faux-recursive) function that returns elements wrapped in this Parenable type, and have
-/// an associated number which lets the functions waiting on their return know whether or not
-/// they should wrap the value they get in brackets.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Brackets<'p> {
     pub doc : StrOrDoc<'p>,
     pub prio : BracketPrio,
 }
-
-
-//trait HasPrettyDisplay {
-//}
-//trait HasPrettyDebug {
-//}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BracketPrio {

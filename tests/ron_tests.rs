@@ -258,6 +258,28 @@ fn ron_test5_1() {
 }       
 
 
+#[test]
+fn ron_test_unit_struct0() {
+    let mut store = Printer::new();
+    let mut ron = RonStruct::new();
+    ron.add_name("MyUnitStruct");
+    let finished = ron.render(80, &mut store);
+    assert_eq!("MyUnitStruct", format!("{}", finished));
+}       
+
+#[test]
+fn ron_test_unit_struct1() {
+    let mut store = Printer::new();
+    let mut ron = RonStruct::new();
+    ron.add_name("MyUnitStruct");
+    ron.add_name("Path1");
+    //ron.add_name("Path2");
+    let finished = ron.render(80, &mut store);
+    println!("finished : {}\n", finished);
+    //assert_eq!("MyUnitStruct::Path1::Path2", format!("{}", finished));
+}       
+
+
 
 
 

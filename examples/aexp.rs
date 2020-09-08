@@ -1,9 +1,13 @@
-use shoebill::compose;
-use shoebill::Printer;
-use shoebill::HasPrinter;
-use shoebill::brackets::Brackets;
-use shoebill::Doclike;
-use shoebill::brackets::Bracketable;
+use shoebill::{
+    compose,
+    Printer,
+    HasPrinter,
+    Doclike,
+    brackets::{ 
+        Brackets,
+        Bracketable
+    },
+};
 use AExp::*;
 
 // Example showing how the built-in bracketing functionality is supposed to work, with
@@ -12,7 +16,6 @@ use AExp::*;
 // that it's extremely likely that we don't want to change our types and logic
 // just to accommodate printing, meaning we'll need both the caller and the callee
 // to be able to have a say in whether a given element is bracketed. 
-
 #[derive(Debug, Clone)]
 pub enum AExp {
     Zero,

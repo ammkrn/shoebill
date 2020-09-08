@@ -1,7 +1,9 @@
 //! Types for formatting items using Rust Object Notation (the format you see when
-//! you debug format Rust items with the `{:#?}` formatter). They all have the same
-//! API, which is `new()`, `add_name()` (which adds a path segment), `add_field()`,
-//! `to_doc()` and `render()` which is a shortcut that includes a call to `to_doc()`.
+//! you debug format Rust items with the `{:#?}` formatter). 
+//!
+//! They all have the same API, which is `new()`, `add_name()` 
+//! (which adds a path segment), `add_field()`, `to_doc()` and `render()` 
+//! which is a shortcut that includes a call to `to_doc()`.
 //!
 //! They're written in such a way that they remain generic over anything that can
 //! be converted into `StrOrDoc`, and you only need to give them the Printer object
@@ -22,6 +24,16 @@ on ungrouping.
 */
 
 
+fn mk_path_name<'p>(segs : Vec<StrOrDoc<'p>>, pr : &mut impl HasPrinter<'p>) -> DocPtr<'p> {
+    segs.into_iter().enumerate().fold(Nil.alloc(pr), |acc, (idx, next)| {
+        if idx == 0 {
+            acc.concat(next, pr)
+        } else {
+            compose!(pr ; acc <> "::" <> next)
+        }
+    })
+}
+
 /// A Rust struct or mapping
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RonStruct<'p> {
@@ -38,7 +50,7 @@ impl<'x, 'p : 'x> RonStruct<'p> {
     }
 
     pub fn add_name(&mut self, n : impl Into<StrOrDoc<'p>>) {
-        self.name = vec![n.into()];
+        self.name.push(n.into());
     }
 
     pub fn add_field(&mut self, k : impl Into<StrOrDoc<'p>>, v : impl Into<StrOrDoc<'p>>) {
@@ -46,30 +58,22 @@ impl<'x, 'p : 'x> RonStruct<'p> {
     }
 
     pub fn to_doc(self, pr : &mut impl HasPrinter<'p>) -> DocPtr<'p> {
-        let nullary = self.fields.is_empty();
+        let name = mk_path_name(self.name, pr);
 
-        let mut d = if self.name.is_empty() {
-            "{".alloc(pr)
+        if self.fields.is_empty() {
+            return name
         } else {
-            self.name.into_iter().enumerate().fold(Nil.alloc(pr), |acc, (idx, next)| {
-                if idx == 0 {
-                    acc.concat(next, pr)
-                } else {
-                    compose!(pr ; acc <> "::" <> next)
-                }
-            }).concat(" { ", pr)
-        };
+            let mut d = match name.read(pr) {
+                Nil => name.concat("{", pr),
+                _ => name.concat(" {", pr)
+            };
 
-        for (k, v) in self.fields.into_iter() {
-            let kv_doc = compose!(pr ; k <> ": " <> v <> ", ");
-            d = compose!(pr ; d <z> kv_doc);
-        }
+            for (k, v) in self.fields.into_iter() {
+                let kv_doc = compose!(pr ; k <> ": " <> v <> ", ");
+                d = compose!(pr ; d <z> kv_doc);
+            }
 
-        d = d.nest(4, pr);
-
-        if nullary {
-            d.concat("}", pr)
-        } else {
+            d = d.nest(4, pr);
             d.nest_doc_zero("}", 0, pr)
         }
     }
@@ -136,27 +140,14 @@ impl<'x, 'p : 'x> RonTuple<'p> {
         let unnamed = self.name.is_empty();
         let nullary = self.fields.is_empty();
 
+        // If it's unnamed and has no fields, it should be rendered as `()`
         if unnamed && nullary {
             return "()".alloc(pr)
         }
 
-        let mut d = if unnamed {
-            "(".alloc(pr)
-        } else {
-            let folded = self.name.into_iter().enumerate().fold(Nil.alloc(pr), |acc, (idx, next)| {
-                if idx == 0 {
-                    acc.concat(next, pr)
-                } else {
-                    compose!(pr ; acc <> "::" <> next)
-                }
-            });
+        let mut d = mk_path_name(self.name, pr);
 
-            if nullary {
-                folded
-            } else {
-                folded.concat("(", pr)
-            }
-        };
+        if !nullary { d = d.concat("(", pr); }
 
         for v in self.fields.into_iter() {
             let v_doc = v.concat(", ", pr);
@@ -181,7 +172,7 @@ impl<'x, 'p : 'x> RonTuple<'p> {
 /// A sequence (slice, array, vec, etc)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RonSequence<'p> {
-    name : Option<StrOrDoc<'p>>,
+    name : Vec<StrOrDoc<'p>>,
     vals : Vec<StrOrDoc<'p>>,
 }
 
@@ -199,13 +190,13 @@ where &'p A : Into<StrOrDoc<'p>> {
 impl<'x, 'p : 'x> RonSequence<'p> {
     pub fn new() -> Self {
         RonSequence {
-            name : None,
+            name : Vec::new(),
             vals : Vec::new()
         }
     }
 
     pub fn add_name(&mut self, n : impl Into<StrOrDoc<'p>>) {
-        self.name = Some(n.into());
+        self.name.push(n.into());
     }
 
     // I know that sequences don't have 'fields' technically, but it seemed
@@ -216,9 +207,9 @@ impl<'x, 'p : 'x> RonSequence<'p> {
 
     pub fn to_doc(self, pr : &mut impl HasPrinter<'p>) -> DocPtr<'p> {
         let nullary = self.vals.is_empty();
-        let mut d = match self.name {
-            None => "[".alloc(pr),
-            Some(n) => n.concat(" [", pr)
+        let mut d = match self.name.is_empty() {
+            true => "[".alloc(pr),
+            false => mk_path_name(self.name, pr).concat(" [", pr)
         };
 
         for v in self.vals {
@@ -243,7 +234,7 @@ impl<'x, 'p : 'x> RonSequence<'p> {
 /// Formats some Option<T>
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RonOption<'p> {
-    name : Option<StrOrDoc<'p>>,
+    name : Vec<StrOrDoc<'p>>,
     inner : Option<StrOrDoc<'p>>,
 }
 
@@ -257,28 +248,29 @@ where A : Into<StrOrDoc<'p>> {
 impl<'x, 'p : 'x> RonOption<'p> {
     pub fn new(inner : Option<impl Into<StrOrDoc<'p>>>) -> Self {
         RonOption {
-            name : None,
+            name : Vec::new(),
             inner : inner.map(|x| x.into())
         }
     }
 
     pub fn add_name(&mut self, n : impl Into<StrOrDoc<'p>>) {
-        self.name = Some(n.into());
+        self.name.push(n.into());
     }
 
     pub fn to_doc(self, pr : &mut impl HasPrinter<'p>) -> DocPtr<'p> {
 
-        match (self.name, self.inner) {
-            (None, None) => "None".alloc(pr),
-            (Some(n), None) => n.concat(": None", pr),
-            (None, Some(x)) => {
+        match (self.name.is_empty(), self.inner) {
+            (true, None) => "None".alloc(pr),
+            (false, None) => mk_path_name(self.name, pr).concat(": None", pr),
+            (true, Some(x)) => {
                 "Some(".alloc(pr)
                 .nest_doc_zero(x, 4, pr)
                 .nest_doc_zero(")", 0, pr)
                 //.group(pr)
             }
-            (Some(n), Some(x)) => {
-                n.concat(": Some(", pr)
+            (false, Some(x)) => {
+                mk_path_name(self.name, pr)
+                .concat(": Some(", pr)
                 .nest_doc_zero(x, 4, pr)
                 .nest_doc_zero(")", 0, pr)
                 //.group(pr)
@@ -295,7 +287,7 @@ impl<'x, 'p : 'x> RonOption<'p> {
 /// Formats some Result<A, E> where both A and E implement `Into<StrOrDoc<'p>>`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RonResult<'p> {
-    name : Option<StrOrDoc<'p>>,
+    name : Vec<StrOrDoc<'p>>,
     inner : StrOrDoc<'p>,
     is_ok : bool,
 }
@@ -317,22 +309,22 @@ impl<'x, 'p : 'x> RonResult<'p> {
         };
 
         RonResult {
-            name : None,
+            name : Vec::new(),
             inner,
             is_ok
         }
     }
 
     pub fn add_name(&mut self, n : impl Into<StrOrDoc<'p>>) {
-        self.name = Some(n.into());
+        self.name.push(n.into());
     }
 
     pub fn to_doc(self, pr : &mut impl HasPrinter<'p>) -> DocPtr<'p> {
-        let mut d = match (self.name, self.is_ok) {
-            (None, true) => "Ok(".alloc(pr),
-            (None, false) => "Err(".alloc(pr),
-            (Some(n), true) => n.concat(": Ok(", pr),
-            (Some(n), false) => n.concat(": Err(", pr)
+        let mut d = match (self.name.is_empty(), self.is_ok) {
+            (true, true) => "Ok(".alloc(pr),
+            (true, false) => "Err(".alloc(pr),
+            (false, true) => mk_path_name(self.name, pr).concat(": Ok(", pr),
+            (false, false) => mk_path_name(self.name, pr).concat(": Err(", pr)
         };
         d = d.nest_doc_zero(self.inner, 4, pr);
         d.nest_doc_zero(")", 0, pr) 
@@ -344,23 +336,3 @@ impl<'x, 'p : 'x> RonResult<'p> {
         d.render(line_width, pr)
     }
 }
-
-// This isn't used yet.
-//#[derive(Debug, Clone, PartialEq, Eq)]
-//pub enum Ron<'p> {
-//    Struct(RonStruct<'p>),
-//    Tuple(RonTuple<'p>),
-//    Sequence(RonSequence<'p>),
-//    Res(RonResult<'p>),
-//    Opt(RonOption<'p>),
-//}
-
-//impl<'p> From<RonStruct<'p>> for Ron<'p> {
-//    fn from(s : RonStruct<'p>) -> Ron<'p> {
-//        Struct(s)
-//    }
-//}
-
-//impl<'p> Ron<'p> {
-
-//}

@@ -1,6 +1,6 @@
 //! Pretty-printer with the following notable points (which may be good or bad depending on what you want) :
 //!
-//! (1) Uses a trait (`Doclike`) to allow insertion of different string types (and already-allocated docs)
+//! (1) Uses a trait [`Doclike`] to allow insertion of different string types (and already-allocated docs)
 //! inline. IE `"a".concat(format!("c"), printer).concat(d, printer)` where `d` is some doc that 
 //! was previously allocated. "a" gets allocated as a &str, and format!("c") as an owned string automatically.
 //!
@@ -10,15 +10,25 @@
 //!
 //! (4) Includes macros allowing users to cut down on syntactic noise when composing docs.
 //!
-//! (5) Uses an explicit allocator (`IndexSet`) for efficiency.
+//! (5) Uses an explicit allocator [`IndexSet`] for efficiency.
 //!
-//! (6) Has explicit support for Rust Object Notation items. The motivating use case for this crate
+//! (6) Has explicit support for [`Rust Object Notation`] items. The motivating use case for this crate
 //! was writing debug implementations for types that have some degree of indirection (like index pointers)
 //! keeping them from using the #[derive(Debug)] macro effectively.
 //!
 //! Taking the printer as the last argument instead of being the `self` item both allows for 
 //! more idiomatic dot composition and plays nicer with the idea that the items of interest are Docs, and
 //! the Printer is just a thing we have to eventually tether our docs/text to.
+//! 
+//! Disclaimer: the Doc pointers use 32-bit integers as their indices. Allocating more than u32::MAX 
+//! docs to a single [`Printer`] will cause a runtime error (via panic). u64 indices might be a 
+//! feature in the future if anyone actually needs it.
+//!
+//! [`Doclike`]: trait.Doclike.html
+//! [`IndexSet`]: ../indexmap/set/struct.IndexSet.html
+//! [`Rust Object Notation`]: https://github.com/ron-rs/ron
+//! [`Printer`]: struct.Printer.html
+
 #![allow(unused_parens)]
 use std::fmt::{ Display, Formatter, Result as FmtResult };
 use std::convert::TryFrom;
@@ -28,7 +38,6 @@ use std::marker::PhantomData;
 use indexmap::IndexSet;
 use rustc_hash::FxHasher;
 
-pub mod immut;
 pub mod brackets;
 pub mod object;
 pub mod ron;
@@ -127,7 +136,7 @@ macro_rules! inter_trailing {
     };
 }
 
-/// Macro for allowing more pleasant composition items that implement `Doclike` using
+/// Macro for allowing more pleasant composition items that implement [`Doclike`] using
 /// more familiar operators.
 /// The infix operators (which are all left-associtive, but allow for grouping w/ parentheses)
 ///```
@@ -148,6 +157,7 @@ macro_rules! inter_trailing {
 ///let d = compose!(&mut store ; "this" <s> "is" <s> "text");
 ///assert_eq!(format!("{}", d.render(80, &mut store)), format!("this is text"));
 ///```
+/// [`Doclike`]: trait.Doclike.html
 #[macro_export]
 macro_rules! compose {
     // Try to collect prefixes first since they're the most specific matches.
@@ -224,23 +234,29 @@ macro_rules! compose {
     };
 }
 
+/// type alias for a `Cow<'p, str>`
 pub type CowStr<'p> = Cow<'p, str>;
 
-/// A tagged union of either a Cow string, or a DocPtr. By using
-/// this type in conjuction with the `Doclike` trait, we get a pretty
+/// A tagged union of either a Cow string, or a [`DocPtr`]. By using
+/// this type in conjuction with the [`Doclike`] trait, we get a pretty
 /// large amount of code reuse while cutting down on syntax noise
 /// since in many cases we can treat string slices, owned strings,
 /// and DocPtr items in the exact same way with the only overhead
 /// being that of dealing with the enum (IE there are no extra
 /// allocations or clones). 
+///
+/// [`DocPtr`]: struct.DocPtr.html
+/// [`Doclike`]: trait.Doclike.html
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StrOrDoc<'p> {
     S(Cow<'p, str>),
     D(DocPtr<'p>)
 }
 
-/// Can create a StrOrDoc from anything that can become a Cow string
+/// Can create a [`StrOrDoc`] from anything that can become a Cow string
 /// (so a CowStr, a string slice, or an owned string)
+///
+/// [`StrOrDoc`]: enum.StrOrDoc.html
 impl<'p, A> From<A> for StrOrDoc<'p>
 where CowStr<'p> : From<A> {
     fn from(a : A) -> StrOrDoc<'p> {
@@ -249,6 +265,9 @@ where CowStr<'p> : From<A> {
 }
 
 /// Can create a StrOrDoc from a DocPtr
+///
+/// [`StrOrDoc`]: enum.StrOrDoc.html
+/// [`DocPtr`]: struct.DocPtr.html
 impl<'p> From<DocPtr<'p>> for StrOrDoc<'p> {
     fn from(d : DocPtr<'p>) -> StrOrDoc<'p> {
         StrOrDoc::D(d)
@@ -270,6 +289,8 @@ impl<'p, P : HasPrinter<'p>> Doclike<'p, P> for StrOrDoc<'p> {
 
 /// Anything that can be turned into a Cow string (a CowStr, a string slice,
 /// or an owned string) is Doclike.
+/// 
+/// [`Doclike`]: trait.Doclike.html
 impl<'p, A, P : HasPrinter<'p>> Doclike<'p, P> for A 
 where CowStr<'p> : From<A> {
     fn alloc(self, pr : &mut P) -> DocPtr<'p> {
@@ -374,9 +395,9 @@ impl<'p, P : HasPrinter<'p>> Doclike<'p, P> for Doc<'p> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DocPtr<'p>(PhantomData<Doc<'p>>, u32);
 
-/// Renderable is a separate thing so that we can use it with 
+/// [`Renderable`] is a separate thing so that we can use it with 
 /// format! and write! style macros. This has two lifetimes so that you can have multiple
-/// Renderable structs in one scope as long as their lifetimes don't overlap. If we ONLY had
+/// [`Renderable`] structs in one scope as long as their lifetimes don't overlap. If we ONLY had
 /// the <'p> lifetime, we wouldn't be able to do something like:
 ///```
 /// //let s1 = format!("{}", d1.render(printer));
@@ -384,6 +405,8 @@ pub struct DocPtr<'p>(PhantomData<Doc<'p>>, u32);
 ///```
 /// without getting an error that printer was still borrwed by the first statement,
 /// since the borrow by render would be believed to have duration <'p>
+///
+/// [`Renderable`]: struct.Renderable.html
 pub struct Renderable<'x, 'p : 'x, P : HasPrinter<'p>> {
     doc : DocPtr<'p>,
     printer : &'x P,
@@ -393,6 +416,8 @@ pub struct Renderable<'x, 'p : 'x, P : HasPrinter<'p>> {
 /// By implementing this as an instance of `Display` for `Renderable`, 
 /// you can render something directly to some sink (as a `Formatter`)
 /// without having to build the actual string first and then write it.
+///
+/// [`Renderable`]: struct.Renderable.html
 impl<'x, 'p : 'x, P : HasPrinter<'p>> Display for Renderable<'x, 'p, P>  {
     fn fmt(&self, f : &mut Formatter) -> FmtResult {
         let mut stack = vec![(self.doc, RenderInfo::new(false, 0, self.line_width))];
@@ -463,7 +488,11 @@ impl<'x, 'p : 'x> DocPtr<'p> {
 
 /// The actual thing what holds the information used in composing
 /// and printing documents. The Cow strings are held in `strings`, and
-/// the doc info is in `Doc`. 
+/// Holds [`CowStr`] elements and Doc elements in separate [`IndexSet`]s.
+/// 
+/// [`CowStr`]: type.CowStr.html
+/// [`Doc`]: enum.Doc.html
+/// [`IndexSet`]: ../indexmap/set/struct.IndexSet.html
 #[derive(Debug)]
 pub struct Printer<'p> {
     strings : FxIndexSet<CowStr<'p>>,
@@ -552,14 +581,14 @@ impl<'p> DocPtr<'p> {
             Nil => false,
             | Hardline
             | Newline(..) => true,
-            Concat { has_newline, .. } => has_newline,
-            Nest   { has_newline, .. } => has_newline,
-            Group  { has_newline, .. } => has_newline,
+            Concat { has_newline, .. } 
+            | Nest   { has_newline, .. }
+            | Group  { has_newline, .. } => has_newline,
             Text   { .. }              => false,
         }
     }   
     
-    pub fn dist_next_newline(&self, pr : &impl HasPrinter<'p>) -> u32 {
+    fn dist_next_newline(&self, pr : &impl HasPrinter<'p>) -> u32 {
         match self.read(pr.printer()) {
             Nil 
             | Hardline 
@@ -571,13 +600,13 @@ impl<'p> DocPtr<'p> {
         }
     }
     
-    pub fn flat_len(self, pr : &impl HasPrinter<'p>) -> u32 {
+    fn flat_len(self, pr : &impl HasPrinter<'p>) -> u32 {
         match self.read(pr.printer()) {
             Nil 
             | Hardline => 0,
-            Concat { flat_len, .. }     => flat_len,
-            Nest   { flat_len, .. }     => flat_len,
-            Group  { flat_len, .. }     => flat_len,
+            Concat { flat_len, .. }
+            | Nest { flat_len, .. }
+            | Group { flat_len, .. } => flat_len,
             Newline(None) => 1,
             Newline(Some(d)) => d.flat_len(pr),
             Text(s)          => u32::try_from(s.read(pr).len()).expect("flat_len got a string whose length was > u32::MAX"),
