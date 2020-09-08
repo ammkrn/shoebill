@@ -14,16 +14,6 @@
 //! to `group()` their elements, UNLESS they're RonStruct mappings, etc.
 use crate::{ compose, Doc::*, Doclike, StrOrDoc, HasPrinter, DocPtr, Renderable };
 
-//use Ron::*;
-
-/*
-self note:
-What you want is to make the primary type for Ron contents a union of StrOrDoc and 
-the unified Ron enum so that you can offer more accurate Ron formatting based 
-on ungrouping.
-*/
-
-
 fn mk_path_name<'p>(segs : Vec<StrOrDoc<'p>>, pr : &mut impl HasPrinter<'p>) -> DocPtr<'p> {
     segs.into_iter().enumerate().fold(Nil.alloc(pr), |acc, (idx, next)| {
         if idx == 0 {
