@@ -125,7 +125,7 @@ impl<'x, 'p : 'x> Brackets<'p> {
     /// A convenience function for rendering the 'last' item; this ignores/discards the given
     /// item's priority and does not add brackets, since it's more likely than not that the final
     /// expression isn't meant to be bracketed.
-    pub fn render<P>(self, line_width : u16, pr : &'x mut P) -> Renderable<'x, 'p, P> 
+    pub fn render<P>(self, line_width : u32, pr : &'x mut P) -> Renderable<'x, 'p, P> 
     where P : HasPrinter<'p> {
         self.doc.alloc(pr).render(line_width, pr)
     }

@@ -20,9 +20,12 @@
 //! more idiomatic dot composition and plays nicer with the idea that the items of interest are Docs, and
 //! the Printer is just a thing we have to eventually tether our docs/text to.
 //! 
-//! Disclaimer: the Doc pointers use 32-bit integers as their indices. Allocating more than u32::MAX 
-//! docs to a single [`Printer`] will cause a runtime error (via panic). u64 indices might be a 
-//! feature in the future if anyone actually needs it.
+//! # Safety
+//!
+//! This crate uses u32 to keep track of Doc elements the length of documents.
+//! Attempting to allocate more than u32::MAX unique docs, or attempting
+//! to render a string with a length greater than u32::MAX will cause a runtime error.
+//! When I have some free time I'll make the use of u64 in those positions an opt-in feature.
 //!
 //! [`Doclike`]: trait.Doclike.html
 //! [`IndexSet`]: ../indexmap/set/struct.IndexSet.html
@@ -234,8 +237,7 @@ macro_rules! compose {
     };
 }
 
-/// type alias for a `Cow<'p, str>`
-pub type CowStr<'p> = Cow<'p, str>;
+type CowStr<'p> = Cow<'p, str>;
 
 /// A tagged union of either a Cow string, or a [`DocPtr`]. By using
 /// this type in conjuction with the [`Doclike`] trait, we get a pretty
@@ -305,6 +307,8 @@ where CowStr<'p> : From<A> {
 }
 
 
+/// A pointer to an allocated string or string slice. You should never have to deal
+/// with this. It's only public since `Doc` would leak it otherwise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StringPtr<'p>(PhantomData<CowStr<'p>>, u32);
 
@@ -317,6 +321,8 @@ impl<'p> StringPtr<'p> {
 }
 
 
+/// Trait that defines items we can treat as Doc elements. We can use methods like
+/// alloc, concat, group, nest, etc. directly on types implementing Doclike.
 pub trait Doclike<'p, P> : Sized 
 where P : HasPrinter<'p> {
     /// Generic over any Doclike, so you can use this for text as well.
@@ -328,9 +334,21 @@ where P : HasPrinter<'p> {
         Concat {
             l,
             r,
-            has_newline : l.has_newline(pr) || r.has_newline(pr),
-            dist_next_newline : l.dist_next_newline(pr) + r.dist_next_newline(pr),
-            flat_len : l.flat_len(pr) + r.flat_len(pr)
+            has_newline : match (l.has_newline(pr), r.has_newline(pr)) {
+                (Some(true), _) | (_, Some(true)) => Some(true),
+                (Some(false), _) | (_, Some(false)) => Some(false),
+                _ => None
+            },
+            dist_next_newline : if l.has_newline(pr).is_some() {
+                l.dist_next_newline(pr)
+            } else {
+                l.dist_next_newline(pr) + r.dist_next_newline(pr)
+            },
+            flat_len : if l.has_newline(pr) == Some(true) {
+                l.flat_len(pr)
+            } else {
+                l.flat_len(pr) + r.flat_len(pr)
+            }
         }.alloc(pr)
     }
 
@@ -387,7 +405,7 @@ impl<'p, P : HasPrinter<'p>> Doclike<'p, P> for DocPtr<'p> {
 impl<'p, P : HasPrinter<'p>> Doclike<'p, P> for Doc<'p> {
     fn alloc(self, pr : &mut P) -> DocPtr<'p> {
         let (idx, _) = pr.printer_mut().docs.insert_full(self);
-        let idx : u32 = u32::try_from(idx).expect("doc alloction exceeds u32::MAX");
+        let idx : u32 = u32::try_from(idx).expect("number of unique docs allocted cannot exceed u32::MAX");
         DocPtr(PhantomData, idx as u32)
     }
 }
@@ -410,7 +428,7 @@ pub struct DocPtr<'p>(PhantomData<Doc<'p>>, u32);
 pub struct Renderable<'x, 'p : 'x, P : HasPrinter<'p>> {
     doc : DocPtr<'p>,
     printer : &'x P,
-    line_width : u16,
+    line_width : u32,
 }
 
 /// By implementing this as an instance of `Display` for `Renderable`, 
@@ -454,10 +472,10 @@ impl<'x, 'p : 'x, P : HasPrinter<'p>> Display for Renderable<'x, 'p, P>  {
                     write!(f, "{}", inner)?
                 },
                 Concat { l, r, .. } => {
-                    let lhs_dist_next_newline = if r.has_newline(self.printer) {
-                        r.dist_next_newline(self.printer) as u16
+                    let lhs_dist_next_newline = if r.has_newline(self.printer).is_some() {
+                        r.dist_next_newline(self.printer)
                     } else {
-                        r.dist_next_newline(self.printer) as u16 + info.dist_next_newline
+                        r.dist_next_newline(self.printer) + info.dist_next_newline
                     };
 
                     stack.push((r, info));
@@ -481,7 +499,7 @@ impl<'x, 'p : 'x, P : HasPrinter<'p>> Display for Renderable<'x, 'p, P>  {
 }
 
 impl<'x, 'p : 'x> DocPtr<'p> {
-    pub fn render<P : HasPrinter<'p>>(self, line_width : u16, store : &'x P) -> Renderable<'x, 'p, P> {
+    pub fn render<P : HasPrinter<'p>>(self, line_width : u32, store : &'x P) -> Renderable<'x, 'p, P> {
         Renderable { doc : self, line_width, printer : store }
     }
 }
@@ -515,6 +533,38 @@ impl<'p> HasPrinter<'p> for Printer<'p> {
         self
     }
 }
+
+/// Trait that allows types to allocate and render Docs. See the trait documentation
+/// for more details.
+///
+/// The type `Printer` is itself an instance of `HasPrinter` so you're free to 
+/// use that, but the intended purpose of this trait is to allow users to turn one 
+/// of their own types into a printer by adding a `Printer` field, then implementing 
+/// `HasPrinter` for their type. For example:
+///```
+/// //pub struct MyState<'p> {
+/// //    ast_elems : Vec<AstElems>,
+/// //    modifiers : HashMap<Modifier, Defn>,
+/// //    printer : Printer<'p>
+/// //}
+/// //
+/// //impl<'p> HasPrinter<'p> for MyState<'p> {
+/// //    fn printer(&self) -> &Printer<'p> {
+/// //        self
+/// //    }
+/// //
+/// //    fn printer_mut(&mut self) -> &mut Printer<'p> {
+/// //        self
+/// //    }
+/// //}
+/// // 
+/// // You can now pass an element of MyState anywhere you need to handle documents.
+/// // let my_state : &mut MyState<'p> = ...;
+/// // let doc1 = ...;
+/// // let doc2 = ...;
+/// // doc3 = doc1.concat(doc2, my_state);
+/// // println!("{}", doc3.render(80, my_state));
+///```
 
 pub trait HasPrinter<'p> {
     fn printer(&self) -> &Printer<'p>;
@@ -551,20 +601,20 @@ pub enum Doc<'p> {
         l : DocPtr<'p>,
         r : DocPtr<'p>,
         flat_len : u32,
-        has_newline : bool,
+        has_newline : Option<bool>,
         dist_next_newline : u32,
     },
     Nest {
         amt : u32, 
         doc : DocPtr<'p>,
         flat_len : u32,
-        has_newline : bool,
+        has_newline : Option<bool>,
         dist_next_newline : u32,
     },
     Group {
         doc : DocPtr<'p>,
         flat_len : u32,
-        has_newline : bool,
+        has_newline : Option<bool>,
         dist_next_newline : u32,
     },
 }
@@ -572,19 +622,19 @@ pub enum Doc<'p> {
 impl<'p> DocPtr<'p> {
     pub fn read(self, store : &impl HasPrinter<'p>) -> Doc<'p> {
         match self {
-            DocPtr(_, idx) => *store.printer().docs.get_index(idx as usize).expect("DocPtr idx exceeds u32::MAX")
+            DocPtr(_, idx) => *store.printer().docs.get_index(idx as usize).expect("DocPtr idx cannot exceed u32::MAX")
         }
     }
 
-    fn has_newline(&self, pr : &impl HasPrinter<'p>) -> bool {
+    fn has_newline(&self, pr : &impl HasPrinter<'p>) -> Option<bool> {
         match self.read(pr.printer()) {
-            Nil => false,
-            | Hardline
-            | Newline(..) => true,
+            Nil => None,
+            Hardline => Some(true),
+            Newline(..) => Some(false),
             Concat { has_newline, .. } 
             | Nest   { has_newline, .. }
             | Group  { has_newline, .. } => has_newline,
-            Text   { .. }              => false,
+            Text   { .. }              => None,
         }
     }   
     
@@ -600,7 +650,7 @@ impl<'p> DocPtr<'p> {
         }
     }
     
-    fn flat_len(self, pr : &impl HasPrinter<'p>) -> u32 {
+    pub(crate) fn flat_len(self, pr : &impl HasPrinter<'p>) -> u32 {
         match self.read(pr.printer()) {
             Nil 
             | Hardline => 0,
@@ -619,7 +669,7 @@ impl<'p> DocPtr<'p> {
 struct RenderInfo {
     flat : bool,
     nest : u16,
-    dist_next_newline : u16,
+    dist_next_newline : u32,
 }
 
 impl Default for RenderInfo {
@@ -636,7 +686,7 @@ impl RenderInfo {
     fn new(
         flat : bool, 
         nest : u16, 
-        dist_next_newline : u16 
+        dist_next_newline : u32 
     ) -> Self {
         RenderInfo {
             flat,
@@ -653,7 +703,7 @@ impl RenderInfo {
         }
     }
 
-    fn new_dist_next_newline(self, dist_next_newline : u16) -> Self {
+    fn new_dist_next_newline(self, dist_next_newline : u32) -> Self {
         RenderInfo {
             flat : self.flat,
             nest : self.nest,
@@ -667,5 +717,82 @@ impl RenderInfo {
             nest : self.nest,
             dist_next_newline : self.dist_next_newline,
         }
+    }
+}
+
+// Needs to be here so I don't have to make flat_len() public.
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+    #[test]
+    fn flat_len_test1() {
+        let mut store = Printer::new();
+        let _x = compose!(&mut store ; "four" <h> "five5" <> "six___");
+        assert_eq!(_x.flat_len(&store), 4);
+        assert_eq!(_x.dist_next_newline(&store), 4);
+    }       
+
+    #[test]
+    fn flat_len_test2() {
+        let mut store = Printer::new();
+        let _x = compose!(&mut store ; "four" <n> "five5" <> "six___");
+        assert_eq!(_x.flat_len(&store), 16);
+        assert_eq!(_x.dist_next_newline(&store), 4);
+    }
+
+    #[test]
+    fn flat_len_test3() {
+        let mut store = Printer::new();
+        let _x = compose!(&mut store ; "four" <z> "five5" <> "six___");
+        assert_eq!(_x.flat_len(&store), 15);
+        assert_eq!(_x.dist_next_newline(&store), 4);
+    }
+
+    #[test]
+    fn flat_len_test4() {
+        let mut store = Printer::new();
+        let _x = compose!(&mut store ; "333" <> "four" <h> "five5" <> "six___");
+        assert_eq!(_x.flat_len(&store), 7);
+        assert_eq!(_x.dist_next_newline(&store), 7);
+    }       
+
+    #[test]
+    fn flat_len_test5() {
+        let mut store = Printer::new();
+        let _x = compose!(&mut store ; "333" <> "four" <n> "five5" <> "six___");
+        assert_eq!(_x.flat_len(&store), 19);
+        assert_eq!(_x.dist_next_newline(&store), 7);
+    }
+
+    #[test]
+    fn flat_len_test6() {
+        let mut store = Printer::new();
+        let _x = compose!(&mut store ; "333" <> "four" <z> "five5" <> "six___");
+        assert_eq!(_x.flat_len(&store), 18);
+        assert_eq!(_x.dist_next_newline(&store), 7);
+    }
+
+    #[test]
+    fn flat_len_test7() {
+        let mut store = Printer::new();
+        let _x = compose!(&mut store ; g @ "333" <> "four" <h> "five5" <> "six___");
+        assert_eq!(_x.flat_len(&store), 7);
+        assert_eq!(_x.dist_next_newline(&store), 7);
+    }       
+
+    #[test]
+    fn flat_len_test8() {
+        let mut store = Printer::new();
+        let _x = compose!(&mut store ; g @ "333" <> "four" <n> "five5" <> "six___");
+        assert_eq!(_x.flat_len(&store), 19);
+        assert_eq!(_x.dist_next_newline(&store), 7);
+    }
+
+    #[test]
+    fn flat_len_test9() {
+        let mut store = Printer::new();
+        let _x = compose!(&mut store ; g @ "333" <> "four" <z> "five5" <> "six___");
+        assert_eq!(_x.flat_len(&store), 18);
+        assert_eq!(_x.dist_next_newline(&store), 7);
     }
 }

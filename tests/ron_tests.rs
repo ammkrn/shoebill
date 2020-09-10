@@ -1,6 +1,5 @@
 
-use shoebill::Printer;
-use shoebill::Doclike;
+use shoebill::{ Doclike, Printer };
 use shoebill::ron::{ RonStruct, RonTuple, RonSequence, RonResult, RonOption };
 
 #[test]
@@ -273,13 +272,10 @@ fn ron_test_unit_struct1() {
     let mut ron = RonStruct::new();
     ron.add_name("MyUnitStruct");
     ron.add_name("Path1");
-    //ron.add_name("Path2");
+    ron.add_name("Path2");
     let finished = ron.render(80, &mut store);
-    println!("finished : {}\n", finished);
-    //assert_eq!("MyUnitStruct::Path1::Path2", format!("{}", finished));
+    assert_eq!("MyUnitStruct::Path1::Path2", format!("{}", finished));
 }       
-
-
 
 
 

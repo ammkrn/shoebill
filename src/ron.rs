@@ -68,7 +68,7 @@ impl<'x, 'p : 'x> RonStruct<'p> {
         }
     }
 
-    pub fn render<P : HasPrinter<'p>>(self, line_width : u16, pr : &'x mut P) -> Renderable<'x, 'p, P> {
+    pub fn render<P : HasPrinter<'p>>(self, line_width : u32, pr : &'x mut P) -> Renderable<'x, 'p, P> {
         let d = self.to_doc(pr);
         d.render(line_width, pr)
     }
@@ -153,7 +153,7 @@ impl<'x, 'p : 'x> RonTuple<'p> {
         }
     }
 
-    pub fn render<P : HasPrinter<'p>>(self, line_width : u16, pr : &'x mut P) -> Renderable<'x, 'p, P> {
+    pub fn render<P : HasPrinter<'p>>(self, line_width : u32, pr : &'x mut P) -> Renderable<'x, 'p, P> {
         let d = self.to_doc(pr);
         d.render(line_width, pr)
     }
@@ -215,7 +215,7 @@ impl<'x, 'p : 'x> RonSequence<'p> {
         }
     }
 
-    pub fn render<P : HasPrinter<'p>>(self, line_width : u16, pr : &'x mut P) -> Renderable<'x, 'p, P> {
+    pub fn render<P : HasPrinter<'p>>(self, line_width : u32, pr : &'x mut P) -> Renderable<'x, 'p, P> {
         let d = self.to_doc(pr);
         d.render(line_width, pr)
     }
@@ -268,7 +268,7 @@ impl<'x, 'p : 'x> RonOption<'p> {
         }
     }
 
-    pub fn render<P : HasPrinter<'p>>(self, line_width : u16, pr : &'x mut P) -> Renderable<'x, 'p, P> {
+    pub fn render<P : HasPrinter<'p>>(self, line_width : u32, pr : &'x mut P) -> Renderable<'x, 'p, P> {
         let d = self.to_doc(pr);
         d.render(line_width, pr)
     }
@@ -321,7 +321,7 @@ impl<'x, 'p : 'x> RonResult<'p> {
         //.group(pr)
     }
 
-    pub fn render<P : HasPrinter<'p>>(self, line_width : u16, pr : &'x mut P) -> Renderable<'x, 'p, P> {
+    pub fn render<P : HasPrinter<'p>>(self, line_width : u32, pr : &'x mut P) -> Renderable<'x, 'p, P> {
         let d = self.to_doc(pr);
         d.render(line_width, pr)
     }
