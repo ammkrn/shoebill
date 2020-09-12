@@ -188,6 +188,10 @@ fn ron_test3_1() {
     nested.add_field(format!("key2"), "val2");
     nested.add_field("key3".alloc(&mut store), "va".concat("l3", &mut store));
     let nested = nested.to_doc(&mut store);
+    assert_eq!(
+        format!("{}", nested.clone().render_flat(80, &mut store)).as_str(),
+        "SomeData { key1: val1, key2: val2, key3: val3, }"
+    );
 
     let mut obj = RonSequence::new();
     obj.add_field(v1);
@@ -195,45 +199,27 @@ fn ron_test3_1() {
     obj.add_field(nested);
     obj.add_field("va".concat("l3", &mut store));
     let obj = obj.to_doc(&mut store);
-
-    println!("unnamed seq : \n{}\n", obj.render(80, &mut store));
+    println!("nested : \n{}\n", obj.render(80, &mut store));
 }       
 
 #[test]
 fn ron_test4_1() {
     let mut store = Printer::new();
-    let r : Result<String, &'static str> = Ok(format!("asdf"));
+    let r : Result<String, &'static str> = Ok(format!("qwertyhjklasdfuiop"));
     let ron_result = RonResult::new(r);
 
-    println!("unnamed result : \n{}\n", ron_result.render(80, &mut store));
+    assert_eq!(format!("{}", ron_result.clone().render(80, &mut store)).as_str(), "Ok(\n    qwertyhjklasdfuiop\n)");
+    assert_eq!(format!("{}", ron_result.render(0, &mut store)).as_str(), "Ok(\n    qwertyhjklasdfuiop\n)");
 }       
 
 #[test]
 fn ron_test4_2() {
     let mut store = Printer::new();
-    let r : Result<String, &'static str> = Ok(format!("qwertyhjklasdfuiop"));
-    let ron_result = RonResult::new(r);
-
-    println!("unnamed result : \n{}\n", ron_result.render(8, &mut store));
-}       
-
-
-#[test]
-fn ron_test4_3() {
-    let mut store = Printer::new();
     let r : Result<String, &'static str> = Err("qwertyhjklasdfuiop");
     let ron_result = RonResult::new(r);
 
-    println!("unnamed result : \n{}\n", ron_result.render(80, &mut store));
-}       
-
-#[test]
-fn ron_test4_4() {
-    let mut store = Printer::new();
-    let r : Result<String, &'static str> = Err("qwertyhjklasdfuiop");
-    let ron_result = RonResult::new(r);
-
-    println!("unnamed result : \n{}\n", ron_result.render(8, &mut store));
+    assert_eq!(format!("{}", ron_result.clone().render(80, &mut store)).as_str(), "Err(\n    qwertyhjklasdfuiop\n)");
+    assert_eq!(format!("{}", ron_result.render(0, &mut store)).as_str(), "Err(\n    qwertyhjklasdfuiop\n)");
 }       
 
 #[test]
@@ -243,7 +229,8 @@ fn ron_test5_0() {
     let mut ron = RonOption::new(r);
     ron.add_name("MyOption");
 
-    println!("named option : \n{}\n", ron.render(80, &mut store));
+    assert_eq!(format!("{}", ron.clone().render(80, &mut store)).as_str(), "MyOption: Some(\n    ASDF\n)");
+    assert_eq!(format!("{}", ron.render(0, &mut store)).as_str(), "MyOption: Some(\n    ASDF\n)");
 }       
 
 #[test]
@@ -256,6 +243,17 @@ fn ron_test5_1() {
     println!("named option : \n{}\n", ron.render(80, &mut store));
 }       
 
+#[test]
+fn ron_test6_1() {
+    let mut store = Printer::new();
+    let mut ron = RonTuple::new();
+    ron.add_name("ATuple");
+
+    ron.add_field("field1");
+    ron.add_field("field2");
+    assert_eq!(format!("{}", ron.clone().render(80, &mut store)).as_str(), "ATuple(\n    field1,\n    field2,\n)");
+    assert_eq!(format!("{}", ron.to_doc(&mut store).render_flat(80, &mut store)).as_str(), "ATuple(field1, field2,)");
+}       
 
 #[test]
 fn ron_test_unit_struct0() {
@@ -276,6 +274,3 @@ fn ron_test_unit_struct1() {
     let finished = ron.render(80, &mut store);
     assert_eq!("MyUnitStruct::Path1::Path2", format!("{}", finished));
 }       
-
-
-

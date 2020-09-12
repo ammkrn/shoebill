@@ -22,10 +22,19 @@
 //! 
 //! # Safety
 //!
-//! This crate uses u32 to keep track of Doc elements the length of documents.
+//! There's no unsafe in this crate, but users should be aware of the following two safety
+//! points with respect to runtime errors:
+//!
+//! 1. This crate uses u32 to keep track of Doc elements the length of documents.
 //! Attempting to allocate more than u32::MAX unique docs, or attempting
 //! to render a string with a length greater than u32::MAX will cause a runtime error.
 //! When I have some free time I'll make the use of u64 in those positions an opt-in feature.
+//!
+//! 2. the API presented by this crate is safe with respect to memory lifetimes; you won't
+//! be able to create a situation where you have a DocPtr to a dropped arena/bad memory, but there's
+//! no guard rail to prevent you from creating multiple printers and accidentally trying to render a Doc
+//! with some printer A when it was actually allocated in printer B. If you happen to do this, 
+//! you'll get a runtime error (panic).
 //!
 //! [`Doclike`]: trait.Doclike.html
 //! [`IndexSet`]: ../indexmap/set/struct.IndexSet.html
@@ -45,7 +54,7 @@ pub mod brackets;
 pub mod object;
 pub mod ron;
 
-pub type FxIndexSet<A> = IndexSet<A, BuildHasherDefault<FxHasher>>;
+type FxIndexSet<A> = IndexSet<A, BuildHasherDefault<FxHasher>>;
 
 use Doc::*;
 
@@ -315,7 +324,17 @@ pub struct StringPtr<'p>(PhantomData<CowStr<'p>>, u32);
 impl<'p> StringPtr<'p> {
     pub fn read(self, store : &impl HasPrinter<'p>) -> &CowStr<'p> {
         match self {
-            StringPtr(_, idx) => store.printer().strings.get_index(idx as usize).expect("failed to retrieve arena String")
+            StringPtr(_, idx) => store.printer().strings.get_index(idx as usize).unwrap_or_else(|| {
+                if idx > u32::MAX {
+                    panic!("StringPtr idx cannot exceed u32::MAX. This shouldn't be possible, so please file an issue.")
+                } else {
+                    panic!(
+                        "StringPtr idx not found. The most likely reason for this is that the doc was rendered
+                        with the wrong Printer. If you only have one Printer, or you think this is not the case,
+                        please file an issue."
+                    )
+                }
+            })
         }
     }
 }
@@ -410,6 +429,7 @@ impl<'p, P : HasPrinter<'p>> Doclike<'p, P> for Doc<'p> {
     }
 }
 
+/// A cheap (copy-able) pointer to an allocated Doc.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DocPtr<'p>(PhantomData<Doc<'p>>, u32);
 
@@ -429,6 +449,7 @@ pub struct Renderable<'x, 'p : 'x, P : HasPrinter<'p>> {
     doc : DocPtr<'p>,
     printer : &'x P,
     line_width : u32,
+    flat : bool,
 }
 
 /// By implementing this as an instance of `Display` for `Renderable`, 
@@ -438,7 +459,7 @@ pub struct Renderable<'x, 'p : 'x, P : HasPrinter<'p>> {
 /// [`Renderable`]: struct.Renderable.html
 impl<'x, 'p : 'x, P : HasPrinter<'p>> Display for Renderable<'x, 'p, P>  {
     fn fmt(&self, f : &mut Formatter) -> FmtResult {
-        let mut stack = vec![(self.doc, RenderInfo::new(false, 0, self.line_width))];
+        let mut stack = vec![(self.doc, RenderInfo::new(self.flat, 0, 0))];
         let mut size = 0usize;
         let mut eol = self.line_width as usize;
         while let Some((top, info)) = stack.pop() {
@@ -485,8 +506,8 @@ impl<'x, 'p : 'x, P : HasPrinter<'p>> Display for Renderable<'x, 'p, P>  {
                     let info = info.add_nest(amt as u16);
                     stack.push((doc, info));
                 },
-                Group { doc, flat_len, dist_next_newline, .. } => {
-                    if info.flat || (size + flat_len as usize + dist_next_newline as usize <= eol) {
+                Group { doc, flat_len, .. } => {
+                    if info.flat || (size + flat_len as usize + info.dist_next_newline as usize <= eol) {
                         stack.push((doc, info.with_flat(true)))
                     } else {
                         stack.push((doc, info.with_flat(false)))
@@ -500,7 +521,11 @@ impl<'x, 'p : 'x, P : HasPrinter<'p>> Display for Renderable<'x, 'p, P>  {
 
 impl<'x, 'p : 'x> DocPtr<'p> {
     pub fn render<P : HasPrinter<'p>>(self, line_width : u32, store : &'x P) -> Renderable<'x, 'p, P> {
-        Renderable { doc : self, line_width, printer : store }
+        Renderable { doc : self, line_width, printer : store, flat : false }
+    }
+
+    pub fn render_flat<P : HasPrinter<'p>>(self, line_width : u32, store : &'x P) -> Renderable<'x, 'p, P> {
+        Renderable { doc : self, line_width, printer : store, flat : true }
     }
 }
 
@@ -622,7 +647,17 @@ pub enum Doc<'p> {
 impl<'p> DocPtr<'p> {
     pub fn read(self, store : &impl HasPrinter<'p>) -> Doc<'p> {
         match self {
-            DocPtr(_, idx) => *store.printer().docs.get_index(idx as usize).expect("DocPtr idx cannot exceed u32::MAX")
+            DocPtr(_, idx) => store.printer().docs.get_index(idx as usize).copied().unwrap_or_else(|| {
+                if idx > u32::MAX {
+                    panic!("DocPtr idx cannot exceed u32::MAX. This shouldn't be possible, so please file an issue.")
+                } else {
+                    panic!(
+                        "DocPtr idx not found. The most likely reason for this is that the doc was rendered
+                        with the wrong Printer. If you only have one Printer, or you think this is not the case,
+                        please file an issue."
+                    )
+                }
+            })
         }
     }
 
@@ -795,4 +830,5 @@ mod unit_tests {
         assert_eq!(_x.flat_len(&store), 18);
         assert_eq!(_x.dist_next_newline(&store), 7);
     }
+
 }

@@ -1,8 +1,9 @@
-use crate::{ concat, Doclike, StrOrDoc, HasPrinter, DocPtr };
+use crate::{ concat, Doclike, StrOrDoc, HasPrinter, DocPtr, Renderable };
+use crate::ron::mk_path_name;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Object<'p> {
-    name : Option<StrOrDoc<'p>>,
+    name : Vec<StrOrDoc<'p>>,
     fields : Vec<(StrOrDoc<'p>, StrOrDoc<'p>)>,
     delims : (&'p str, &'p str),
     sep : &'p str,
@@ -10,10 +11,10 @@ pub struct Object<'p> {
     nest : u8
 }
 
-impl<'p> Object<'p> {
+impl<'x, 'p : 'x> Object<'p> {
     pub fn new() -> Self {
         Object {
-            name : None,
+            name : Vec::new(),
             fields : Vec::new(),
             delims : (" {", "};"),
             assn : ": ",
@@ -22,44 +23,33 @@ impl<'p> Object<'p> {
         }
     }
 
-    pub fn name(mut self, n : impl Into<StrOrDoc<'p>>) -> Self {
-        self.name = Some(n.into());
-        self
+    pub fn add_name(&mut self, n : impl Into<StrOrDoc<'p>>) {
+        self.name.push(n.into());
     }
 
-    pub fn field_nest(mut self, amt : u8) -> Self {
+    pub fn field_nest(&mut self, amt : u8) {
         self.nest = amt;
-        self
     }
 
-    pub fn delims(mut self, open : &'p str, close : &'p str) -> Self {
+    pub fn delims(&mut self, open : &'p str, close : &'p str) {
         self.delims = (open, close);
-        self
     }
     
-    pub fn assn(mut self, assn : &'p str) -> Self {
+    pub fn assn(&mut self, assn : &'p str) {
         self.assn = assn;
-        self
     }
 
-    pub fn sep(mut self, sep : &'p str) -> Self {
+    pub fn sep(&mut self, sep : &'p str) {
         self.sep = sep;
-        self
     }
 
-    pub fn add_field(mut self, k : impl Into<StrOrDoc<'p>>, v : impl Into<StrOrDoc<'p>>) -> Self {
-        let field = (k.into(), v.into());
-        self.fields.push(field);
-        self
+    pub fn add_field(&mut self, k : impl Into<StrOrDoc<'p>>, v : impl Into<StrOrDoc<'p>>) {
+        self.fields.push((k.into(), v.into()));
     }
 
     pub fn to_doc(self, pr : &mut impl HasPrinter<'p>) -> DocPtr<'p> {
-        let mut d = match self.name {
-            None => self.delims.0.alloc(pr),
-            Some(n) => {
-                n.concat(self.delims.0, pr)
-            }
-        };
+        let mut d = mk_path_name(self.name, pr);
+        d = d.concat(self.delims.0, pr);
 
         for (k, v) in self.fields {
             let kv = concat!([k, self.assn, v, self.sep], pr);
@@ -69,4 +59,9 @@ impl<'p> Object<'p> {
 
         d.nest_doc(self.delims.1, 0, pr)
     }
+
+    pub fn render<P : HasPrinter<'p>>(self, line_width : u32, pr : &'x mut P) -> Renderable<'x, 'p, P> {
+        let d = self.to_doc(pr);
+        d.render(line_width, pr)
+    }    
 }

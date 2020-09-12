@@ -14,7 +14,7 @@
 //! to `group()` their elements, UNLESS they're RonStruct mappings, etc.
 use crate::{ compose, Doc::*, Doclike, StrOrDoc, HasPrinter, DocPtr, Renderable };
 
-fn mk_path_name<'p>(segs : Vec<StrOrDoc<'p>>, pr : &mut impl HasPrinter<'p>) -> DocPtr<'p> {
+pub(crate) fn mk_path_name<'p>(segs : Vec<StrOrDoc<'p>>, pr : &mut impl HasPrinter<'p>) -> DocPtr<'p> {
     segs.into_iter().enumerate().fold(Nil.alloc(pr), |acc, (idx, next)| {
         if idx == 0 {
             acc.concat(next, pr)
@@ -59,12 +59,12 @@ impl<'x, 'p : 'x> RonStruct<'p> {
             };
 
             for (k, v) in self.fields.into_iter() {
-                let kv_doc = compose!(pr ; k <> ": " <> v <> ", ");
-                d = compose!(pr ; d <z> kv_doc);
+                let kv_doc = compose!(pr ; k <> ": " <> v <> ",");
+                d = compose!(pr ; d <n> kv_doc);
             }
 
             d = d.nest(4, pr);
-            d.nest_doc_zero("}", 0, pr)
+            d.nest_doc("}", 0, pr)
         }
     }
 
@@ -139,9 +139,13 @@ impl<'x, 'p : 'x> RonTuple<'p> {
 
         if !nullary { d = d.concat("(", pr); }
 
-        for v in self.fields.into_iter() {
-            let v_doc = v.concat(", ", pr);
-            d = compose!(pr ; d <z> v_doc);
+        for (idx, v) in self.fields.into_iter().enumerate() {
+            let v_doc = v.concat(",", pr);
+            if idx == 0 {
+               d = compose!(pr ; d <z> v_doc);
+            } else {
+               d = compose!(pr ; d <n> v_doc);
+            }
         }
 
         d = d.nest(4, pr);

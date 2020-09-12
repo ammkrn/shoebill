@@ -79,10 +79,10 @@ fn test8() {
 #[test]
 fn test10() {
     let mut store = Printer::new();
-    let obj = Object::new()
-    .name("MyObject")
-    .add_field("key1", "val1")
-    .add_field("key2", format!("val2"));
+    let mut obj = Object::new();
+    obj.add_name("MyObject");
+    obj.add_field("key1", "val1");
+    obj.add_field("key2", format!("val2"));
 
     let obj = obj.to_doc(&mut store);
     println!("rendered obj (10) : \n{}", obj.render(80, &store));
@@ -91,41 +91,39 @@ fn test10() {
 #[test]
 fn test11() {
     let mut store = Printer::new();
-    let obj1 = Object::new()
-    .name("MyObject")
-    .add_field("key1", "val1")
-    .add_field("key2", format!("val2"));
+    let mut obj1 = Object::new();
+    obj1.add_name("MyObject");
+    obj1.add_field("key1", "val1");
+    obj1.add_field("key2", format!("val2"));
+    assert_eq!(format!("{}", obj1.clone().render(80, &mut store)).as_str(), "MyObject {\n    key1: val1,\n    key2: val2,\n};");
 
-    let obj2 = Object::new()
-    .name("Obj2")
-    .add_field("keyA", "X")
-    .add_field("keyB", obj1.to_doc(&mut store))
-    .add_field("keyC", format!("Y"))
-    .to_doc(&mut store);
+    let mut obj2 = Object::new();
+    obj2.add_name("Obj2");
+    obj2.add_field("keyA", "X");
+    obj2.add_field("keyB", obj1.to_doc(&mut store));
+    obj2.add_field("keyC", format!("Y"));
 
-    println!("rendered obj2 (11) : \n{}", obj2.render(80, &store));
+    println!("rendered obj2 (11) : \n{}", obj2.render(80, &mut store));
 }
 
 #[test]
 fn test12() {
     let mut store = Printer::new();
-    let obj1 = Object::new()
-    .name("MyObject")
-    .add_field("key1", "val1")
-    .add_field("key2", format!("val2"))
-    .delims("(", ")")
-    .to_doc(&mut store);
+    let mut obj1 = Object::new();
+    obj1.add_name("MyObject");
+    obj1.add_field("key1", "val1");
+    obj1.add_field("key2", format!("val2"));
+    obj1.delims("(", ")");
 
-    let obj2 = Object::new()
-    .name("Obj2")
-    .add_field("keyA", "X")
-    .add_field("keyB", obj1)
-    .add_field("keyC", format!("Y"))
-    .delims(" [", "];")
-    .assn(" := ")
-    .to_doc(&mut store);
+    let mut obj2 = Object::new();
+    obj2.add_name("Obj2");
+    obj2.add_field("keyA", "X");
+    obj2.add_field("keyB", obj1.to_doc(&mut store));
+    obj2.add_field("keyC", format!("Y"));
+    obj2.delims(" [", "];");
+    obj2.assn(" := ");
 
-    println!("rendered obj2 (11) : \n{}", obj2.render(80, &store));
+    println!("rendered obj2 (11) : \n{}", obj2.render(80, &mut store));
 }
 
 #[test]
@@ -289,3 +287,46 @@ fn test31() {
     assert_eq!(format!("{}", d.render(80, &mut store)), s1);
 }
 
+#[test]
+fn group_test0() {
+    let mut store = Printer::new();
+    let mut d = compose!(&mut store ; g @ "12" <z> "34");
+    let extra = compose!(&mut store ; "56" <z> "789");
+    d = d.concat(extra, &mut store);
+    // Should break even though it doesn't run over. 
+    let finished = format!("{}", d.render(8, &mut store));
+    assert_eq!(finished.as_str(), "123456\n789");
+}
+
+#[test]
+fn group_test1() {
+    let mut store = Printer::new();
+    let mut d = compose!(&mut store ; g @ "12" <z> "34");
+    let extra = compose!(&mut store ; "56" <z> "78901234");
+    d = d.concat(extra, &mut store);
+
+    // Should break since it runs over.
+    let finished = format!("{}", d.render(8, &mut store));
+    assert_eq!(finished.as_str(), "123456\n78901234");
+}
+
+#[test]
+fn group_test2() {
+    let mut store = Printer::new();
+    let mut d = compose!(&mut store ; g @ "12" <z> "34");
+    d = compose!(&mut store ; d <> "56" <z> "78901234");
+
+    // Should break since it runs over.
+    let finished = format!("{}", d.render(8, &mut store));
+    assert_eq!(finished.as_str(), "123456\n78901234");
+}
+
+#[test]
+fn group_test3() {
+    let mut store = Printer::new();
+    let mut d = compose!(&mut store ; "12" <z> "34");
+    d = compose!(&mut store ; g @ (d <> "56" <z> "01234567"));
+
+    let finished = format!("{}", d.render(8, &mut store));
+    assert_eq!(finished.as_str(), "12\n3456\n01234567");
+}
