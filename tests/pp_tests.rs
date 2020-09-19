@@ -330,3 +330,20 @@ fn group_test3() {
     let finished = format!("{}", d.render(8, &mut store));
     assert_eq!(finished.as_str(), "12\n3456\n01234567");
 }
+#[test]
+fn group_test4() {
+    let mut store = Printer::new();
+    let empty = "".alloc(&mut store);
+    let n = Newline(Some(empty)).alloc(&mut store);
+    let row1 = concat_w!(["0123401234", "0123401234", "0123401234"], n, &mut store).group(&mut store);
+    let part1 = concat_w!(["01234", "01234"], n, &mut store).group(&mut store);
+    let row2 = concat_w!([part1, part1, part1], n, &mut store).group(&mut store);
+
+    let finished1 = format!("{}", row1.render(11, &mut store));
+    let finished2 = format!("{}", row2.render(11, &mut store));
+    let finished3 = format!("{}", row2.render_flat(11, &mut store));
+    let target = format!("0123401234\n0123401234\n0123401234");
+    assert_eq!(finished1, target);
+    assert_eq!(finished2, target);
+    assert_eq!(finished3, "012340123401234012340123401234");
+}

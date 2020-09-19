@@ -471,14 +471,12 @@ impl<'x, 'p : 'x, P : HasPrinter<'p>> Display for Renderable<'x, 'p, P>  {
                 },
                 // If we get a Newline with no specified flatmode repr, just insert a space.
                 Newline(None) if info.flat => {
-                    eol += 1;
                     size += 1;
                     write!(f, " ")?;
                 }
                 Hardline | Newline(_) => {
                     assert!(!info.flat || top.read(self.printer) == Hardline);
                     write!(f, "\n")?;
-                    eol += 1;
                     size += 1;
                     eol += (size + self.line_width as usize);
                     for _ in 0..info.nest {
@@ -488,7 +486,6 @@ impl<'x, 'p : 'x, P : HasPrinter<'p>> Display for Renderable<'x, 'p, P>  {
                 },
                 Text(ptr) => {
                     let inner = ptr.read(self.printer.printer());
-                    eol += inner.len();
                     size += inner.len();
                     write!(f, "{}", inner)?
                 },
